@@ -35,7 +35,7 @@ SOFTWARE.
 extern "C" {
 #endif
 
-#include "stm32f1xx_hal.h"
+#include "main.h"
 
 /* MS5607 SPI COMMANDS */
 #define RESET_COMMAND                 0x1E
@@ -148,14 +148,14 @@ int32_t MS5607GetPressurePa(void);
  * @param  None
  * @retval None
  */
-void enableCSB(void);
+void MS5607EnableCSB(void);
 
 /**
  * @brief  Disables the chip select pin
  * @param  None
  * @retval None
  */
-void disableCSB(void);
+void MS5607DisableCSB(void);
 
 /**
  * @brief  Sets the temperature reading oversamplig ratio

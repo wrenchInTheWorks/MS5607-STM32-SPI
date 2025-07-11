@@ -28,7 +28,7 @@ SOFTWARE.
  ================================================================================================
  */
 
-#include <MS5607SPI.h>
+#include "MS5607SPI.h"
 
 /* Private SPI Handler */
 static SPI_HandleTypeDef *hspi;
@@ -53,20 +53,98 @@ static struct MS5607UncompensatedValues uncompValues;
 /* Compensated values structure */
 static struct MS5607Readings readings;
 
-/** Reset and prepare for general usage.
+/**
+ * ================================================================================================
+ * __weak functions for user to override if required
+ * ================================================================================================
+*/
+__weak void MS5607EnableCSB(void);
+__weak void MS5607DisableCSB(void);
+__weak void MS5607Delay(uint32_t delay);
+__weak HAL_StatusTypeDef MS5607SendCommand(uint8_t CMD);
+__weak HAL_StatusTypeDef MS5607ReadData(uint8_t CMD, uint8_t *data, uint16_t bytesToRead, uint16_t timeout);
+
+
+/*
+ * @brief  Resets the Chip Select pin to select the MS5607 device
+ * @param  None
+ * @retval None
+ */
+__weak void MS5607EnableCSB(void)
+{
+  HAL_GPIO_WritePin(CS_GPIO_Port, CS_Pin, GPIO_PIN_RESET);
+}
+
+/**
+ * @brief  Sets the Chip Select pin to deselect the MS5607 device
+ * @param  None
+ * @retval None
+ */
+__weak void MS5607DisableCSB(void)
+{
+  HAL_GPIO_WritePin(CS_GPIO_Port, CS_Pin, GPIO_PIN_SET);
+}
+
+/**
+ * @brief  Delays the execution for a given amount of milliseconds
+ * @param  delay: Amount of milliseconds to delay
+ * @retval None
+ */
+__weak void MS5607Delay(uint32_t delay)
+{
+  HAL_Delay(delay);
+}
+
+/**
+ * @brief Sends command to the MS5607 device
+ * @param uint8_t CMD: Command to send to the device
+ * @return HAL_StatusTypeDef: Status of the transmission
+ */
+__weak HAL_StatusTypeDef MS5607SendCommand(uint8_t CMD)
+{
+  HAL_StatusTypeDef status = HAL_SPI_Transmit(hspi, &CMD, 1, 10);
+  return status;
+}
+
+/**
+ * @brief Reads data from the MS5607 device
+ * @param uint8_t CMD: Command to read data from the device
+ * @param uint8_t *data: Pointer to the data buffer to store the read data
+ * @param uint16_t bytesToRead: Number of bytes to read from the device
+ * @param uint16_t timeout: Timeout for the read operation
+ * @return HAL_StatusTypeDef: Status of the read operation
+ */
+__weak HAL_StatusTypeDef MS5607ReadData(uint8_t CMD, uint8_t *data, uint16_t bytesToRead, uint16_t timeout) {
+  HAL_StatusTypeDef status = HAL_SPI_Transmit(hspi, &CMD, 1, 10);
+  if (status == HAL_OK) {
+	status = HAL_SPI_Receive(hspi, data, bytesToRead, 10);
+  }
+  return status;
+}
+
+
+/**
+ * ================================================================================================
+ * Private functions do not modify this section
+ * ================================================================================================
+*/
+
+/**
+ * Reset and prepare for general usage.
  * This will reset the device and perform the PROM reading to find the conversion values and if
  * the communication is working.
- */
+*/
 MS5607StateTypeDef MS5607_Init(SPI_HandleTypeDef *hspix, GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin) {
   hspi = hspix;
   CS_GPIO_Port = GPIOx;
   CS_Pin = GPIO_Pin;
 
-  enableCSB();
   SPITransmitData = RESET_COMMAND;
-  HAL_SPI_Transmit(hspi, &SPITransmitData, 1, 10);
-  HAL_Delay(3);
-  disableCSB();
+
+  MS5607EnableCSB();
+  MS5607SendCommand(SPITransmitData);
+  MS5607Delay(3); // Wait for 3ms as per datasheet
+  MS5607DisableCSB();
 
   MS5607PromRead(&promData);
 
@@ -86,11 +164,9 @@ void MS5607PromRead(struct promData *prom){
 
   for (address = 0; address < 8; address++) {
     SPITransmitData = PROM_READ(address);
-    enableCSB();
-    HAL_SPI_Transmit(hspi, &SPITransmitData, 1, 10);
-    /* Receive two bytes at once and stores it directly at the structure */
-    HAL_SPI_Receive(hspi, structPointer, 2, 10);
-    disableCSB();
+    MS5607EnableCSB();
+    MS5607ReadData(SPITransmitData, (uint8_t *) structPointer, 2, 10);
+    MS5607DisableCSB();
     structPointer++;
   }
 
@@ -111,64 +187,60 @@ void MS5607UncompensatedRead(struct MS5607UncompensatedValues *uncompValues){
   /*Sensor reply data buffer*/
   uint8_t reply[3];
 
-  enableCSB();
+  MS5607EnableCSB();
   /* Assemble the conversion command based on previously set OSR */
   SPITransmitData = CONVERT_D1_COMMAND | Pressure_OSR;
-  HAL_SPI_Transmit(hspi, &SPITransmitData, 1, 10);
+  MS5607SendCommand(SPITransmitData);
 
   if(Pressure_OSR == 0x00)
-    HAL_Delay(1);
+	MS5607Delay(1);
   else if(Pressure_OSR == 0x02)
-    HAL_Delay(2);
+	MS5607Delay(2);
   else if(Pressure_OSR == 0x04)
-    HAL_Delay(3);
+	MS5607Delay(3);
   else if(Pressure_OSR == 0x06)
-    HAL_Delay(5);
+    MS5607Delay(5);
   else
-    HAL_Delay(10);
+    MS5607Delay(10);
 
-  disableCSB();
+  MS5607DisableCSB();
 
   /* Performs the reading of the 24 bits from the ADC */
 
-  enableCSB();
-
   SPITransmitData = READ_ADC_COMMAND;
-  HAL_SPI_Transmit(hspi, &SPITransmitData, 1, 10);
-  HAL_SPI_Receive(hspi, reply, 3, 10);
-
-  disableCSB();
+  MS5607EnableCSB();
+  MS5607ReadData(READ_ADC_COMMAND, reply, 3, 10);
+  MS5607DisableCSB();
 
   /* Tranfer the 24bits read into a 32bit int */
   uncompValues->pressure = ((uint32_t) reply[0] << 16) | ((uint32_t) reply[1] << 8) | (uint32_t) reply[2];
 
-  enableCSB();
+  MS5607EnableCSB();
 
   /* Assemble the conversion command based on previously set OSR */
   SPITransmitData = CONVERT_D2_COMMAND | Temperature_OSR;
-  HAL_SPI_Transmit(hspi, &SPITransmitData, 1, 10);
+  MS5607SendCommand(SPITransmitData);
 
   if(Temperature_OSR == 0x00)
-    HAL_Delay(1);
+    MS5607Delay(1);
   else if(Temperature_OSR == 0x02)
-    HAL_Delay(2);
+    MS5607Delay(2);
   else if(Temperature_OSR == 0x04)
-    HAL_Delay(3);
+    MS5607Delay(3);
   else if(Temperature_OSR == 0x06)
-    HAL_Delay(5);
+    MS5607Delay(5);
   else
-    HAL_Delay(10);
+    MS5607Delay(10);
 
-  disableCSB();
+  MS5607DisableCSB();
 
 
-  enableCSB();
+  MS5607EnableCSB();
 
   SPITransmitData = READ_ADC_COMMAND;
-  HAL_SPI_Transmit(hspi, &SPITransmitData, 1, 10);
-  HAL_SPI_Receive(hspi, reply, 3, 10);
+  MS5607ReadData(READ_ADC_COMMAND, reply, 3, 10);
 
-  disableCSB();
+  MS5607DisableCSB();
 
   /* Assemble the conversion command based on previously set OSR */
   uncompValues->temperature = ((uint32_t) reply[0] << 16) | ((uint32_t) reply[1] << 8) | (uint32_t) reply[2];
@@ -223,16 +295,6 @@ double MS5607GetTemperatureC(void){
 /* Gets the pressure from the sensor reading */
 int32_t MS5607GetPressurePa(void){
   return readings.pressure;
-}
-
-/* Sets the CS pin */
-void enableCSB(void){
-  HAL_GPIO_WritePin(CS_GPIO_Port, CS_Pin, GPIO_PIN_RESET);
-}
-
-/* Sets the CS pin */
-void disableCSB(void){
-  HAL_GPIO_WritePin(CS_GPIO_Port, CS_Pin, GPIO_PIN_SET);
 }
 
 /* Sets the OSR for temperature */
